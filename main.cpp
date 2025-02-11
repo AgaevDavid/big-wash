@@ -5,49 +5,100 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <map>
 
-struct Tile {
+// Объявляем map, который связывает значения тайлов с информацией о текстуре
+const std::map<int, sf::IntRect> tileTextureMap = {
+    {1, sf::IntRect(0 * 64, 0, 64, 64)},  // tile.value = 1
+    {2, sf::IntRect(1 * 64, 0, 64, 64)},  // tile.value = 2
+    {3, sf::IntRect(2 * 64, 0, 64, 64)},  // tile.value = 3
+    {4, sf::IntRect(3 * 64, 0, 64, 64)},  // tile.value = 4
+    {5, sf::IntRect(4 * 64, 0, 64, 64)},  // tile.value = 5
+    {6, sf::IntRect(5 * 64, 0, 64, 64)}   // tile.value = 6
+};
+
+class Tile {
+public:
+    Tile() : scale(1.0f), alpha(255.0f), targetScale(1.0f), moving(false), removing(false), appearing(false), scaling(false), value(0), distrib(1, 6) {}
+
+    void setTexture(const sf::Texture& texture) {
+        sprite.setTexture(texture);
+    }
+
+    void setValue(int val) {
+        value = val;
+    }
+
+    void setPosition(float x, float y) {
+        currentPos.x = x;
+        currentPos.y = y;
+        targetPos = currentPos; // Целевая позиция совпадает с начальной
+    }
+
+    void updateSprite(const sf::Texture& clothesTexture) {
+        if (value >= 1 && value <= 6)
+        {
+            // Устанавливаем текстуру для одежды
+            if (sprite.getTexture() != &clothesTexture)
+            {
+                sprite.setTexture(clothesTexture);
+            }
+
+            // Используем map для получения координат текстуры
+            const auto it = tileTextureMap.find(value);
+            if (it != tileTextureMap.end())
+            {
+                sprite.setTextureRect(it->second); // it->second - это значение (sf::IntRect)
+            }
+            else
+            {
+                // Обработка случая, когда для данного значения tile.value нет информации о текстуре
+                // Например, можно установить текстуру по умолчанию
+                std::cerr << "Warning: No texture information found for tile.value = " << value << std::endl;
+            }
+            sprite.setColor(sf::Color::White); // Восстанавливаем видимость
+        }
+        else if (value == 9)
+        {
+            // Угловые элементы: скрываем или устанавливаем другую текстуру
+            sprite.setColor(sf::Color::Transparent);
+        }
+        else if (removing) {
+            sprite.setColor(sf::Color::Transparent);
+        }
+    }
+
+    int getValue() const { return value; }
+    void setRandomValue(std::mt19937& gen) { value = distrib(gen); }
+
+public:
     sf::Sprite sprite;
     sf::Vector2f currentPos;
     sf::Vector2f targetPos;
-    float scale = 1.0f;
-    float alpha = 255.0f;
-    bool moving = false;
-    bool removing = false;
-    bool appearing = false;
-    int value = 0;
+    float scale;
+    float alpha;
+    float targetScale;
+    bool moving;
+    bool removing;
+    bool appearing;
+    bool scaling;
+    int value;
+
+private:
+    std::uniform_int_distribution<> distrib;
 };
 
-void updateTileSprite(Tile& tile, const sf::Texture& clothesTexture)
-{
-    // Проверяем, что значение тайла находится в допустимом диапазоне (от 1 до 6)
-    if (tile.value >= 1 && tile.value <= 6)
-    {
-        // Устанавливаем текстуру для спрайта, если она еще не установлена
-        if (tile.sprite.getTexture() == nullptr)
-        {
-            tile.sprite.setTexture(clothesTexture);
-        }
-
-        // Вычисляем индекс элемента одежды (учитываем, что значения в tileMap от 1 до 6)
-        int tileIndex = tile.value - 1;
-
-        // Устанавливаем область текстуры для спрайта одежды (выбираем нужный элемент)
-        tile.sprite.setTextureRect(sf::IntRect(tileIndex * 64, 0, 64, 64));
-    }
-}
-
-// Функция для поиска и замены совпадений
-void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, sf::Texture& clothesTexture)
+bool findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, sf::Texture& clothesTexture)
 {
     int height = tileMap.size();
-    if (height == 0) return;
+    if (height == 0) return false;
     int width = tileMap[0].size();
-    if (width == 0) return;
+    if (width == 0) return false;
 
     std::vector<std::vector<bool>> toRemove(height, std::vector<bool>(width, false));
+    bool matchesFound = false;
 
-    // Поиск горизонтальных совпадений (игнорируя 0 и 9)
+    // Поиск горизонтальных совпадений
     for (int y = 0; y < height; ++y)
     {
         int start = 0;
@@ -65,6 +116,7 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
                     for (int k = x - matchLength; k < x; ++k)
                     {
                         toRemove[y][k] = true;
+                        matchesFound = true;
                     }
                 }
                 start = x;
@@ -73,7 +125,7 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
         }
     }
 
-    // Поиск вертикальных совпадений (игнорируя 0 и 9)
+    // Поиск вертикальных совпадений
     for (int x = 0; x < width; ++x)
     {
         int start = 0;
@@ -91,6 +143,7 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
                     for (int k = y - matchLength; k < y; ++k)
                     {
                         toRemove[k][x] = true;
+                        matchesFound = true;
                     }
                 }
                 start = y;
@@ -99,11 +152,20 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
         }
     }
 
-    // Обновление столбцов с учетом 9 и замена нулей
+    if (!matchesFound)
+    {
+        return false;
+    }
+
+    // Создаем генератор случайных чисел и распределение
+    std::random_device rd; // Используем для получения случайного seed
+    std::mt19937 gen(rd()); // Mersenne Twister engine
+    std::uniform_int_distribution<> distrib(1, 6); // Распределение от 1 до 6
+
     for (int x = 0; x < width; ++x)
     {
         std::vector<int> splitIndices;
-        splitIndices.push_back(-1); // Начальная граница
+        splitIndices.push_back(-1);
         for (int y = 0; y < height; ++y)
         {
             if (tileMap[y][x] == 9)
@@ -111,14 +173,13 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
                 splitIndices.push_back(y);
             }
         }
-        splitIndices.push_back(height); // Конечная граница
+        splitIndices.push_back(height);
 
         for (int i = 0; i < splitIndices.size() - 1; ++i)
         {
             int segStart = splitIndices[i] + 1;
             int segEnd = splitIndices[i + 1];
             int segLen = segEnd - segStart;
-
             if (segLen <= 0) continue;
 
             std::vector<int> survivingElements;
@@ -160,20 +221,28 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
             {
                 if (tileMap[y][x] == 0)
                 {
-                    tileMap[y][x] = rand() % 6 + 1;
+                    tileMap[y][x] = distrib(gen); // Используем distrib(gen) для генерации случайных чисел
                     tiles[y][x].value = tileMap[y][x];
                     tiles[y][x].appearing = true; // Запуск анимации появления
-                    updateTileSprite(tiles[y][x], clothesTexture); // Передаем текстуру одежды
+                    tiles[y][x].updateSprite(clothesTexture);
                 }
             }
         }
     }
+
+    return true;
 }
 
-static bool isSquareSelected(int x, int y, int mouseX, int mouseY, int squareSize, int startX, int startY) //проверяет в какой квадрат указывает мышь
+// Функция проверки, находится ли точка (mouseX, mouseY) внутри квадрата
+bool isSquareSelected(int x, int y, int mouseX, int mouseY, int squareSize, int offsetX, int offsetY)
 {
-    return mouseX >= startX + x * squareSize && mouseX < startX + (x + 1) * squareSize &&
-        mouseY >= startY + y * squareSize && mouseY < startY + (y + 1) * squareSize;
+    int squareLeft = offsetX + x * squareSize;
+    int squareTop = offsetY + y * squareSize;
+    int squareRight = squareLeft + squareSize;
+    int squareBottom = squareTop + squareSize;
+
+    return (mouseX >= squareLeft && mouseX <= squareRight &&
+        mouseY >= squareTop && mouseY <= squareBottom);
 }
 
 // Функция для преобразования hex-цвета в sf::Color
@@ -219,7 +288,7 @@ int main()
     sf::RenderWindow window(sf::VideoMode(1366, 770), "Big wash"); // Создаем окно SFML с разрешением 1366x770 и заголовком "Big wash"
 
     sf::Texture background; // Создаем текстуру для фона
-    if (!background.loadFromFile("pictures/background.png")) 
+    if (!background.loadFromFile("pictures/background.png"))
     {
         std::cerr << "Error loading background.png" << std::endl;
         return EXIT_FAILURE;
@@ -231,7 +300,7 @@ int main()
 
     //добавляем панель с левой стороны экрана
     sf::Image leftSidePanelImage; // Создаем изображение для левой боковой панели
-    if (!leftSidePanelImage.loadFromFile("pictures/panel_L_arrows.png")) 
+    if (!leftSidePanelImage.loadFromFile("pictures/panel_L_arrows.png"))
     { // Загружаем изображение панели из файла, проверяем на ошибку
         std::cerr << "Error loading pictures/panel_L_arrows.png" << std::endl; // Выводим сообщение об ошибке в консоль, если загрузка не удалась
         return EXIT_FAILURE; // Завершаем программу с кодом ошибки
@@ -260,27 +329,11 @@ int main()
     mainPanelSprite.setTextureRect(sf::IntRect(0, 0, 636, 636)); // Устанавливаем область текстуры, которая будет отображаться (часть панели)
     mainPanelSprite.setPosition(365, 67); // Устанавливаем позицию спрайта панели
 
-    //sf::Image clothes; // Создаем изображение для элементов одежды
-    //clothes.loadFromFile("pictures/clothes.png"); // Загружаем изображение одежды из файла
-
-    //sf::Texture clothes1; // Создаем текстуру для элементов одежды
-    //clothes1.loadFromImage(clothes); // Загружаем изображение в текстуру
-    //if (!clothes.loadFromFile("pictures/clothes.png")) // Повторно загружаем изображение и проверяем на ошибку (дублирование проверки)
-    //{
-    //    return EXIT_FAILURE; // Завершаем программу с кодом ошибки, если загрузка не удалась
-    //}
-
-    //sf::Sprite s_clothes; // Создаем спрайт для элементов одежды
-    //s_clothes.setTexture(clothes1); // Устанавливаем текстуру для спрайта одежды
-
     sf::Texture clothesTexture;
     if (!clothesTexture.loadFromFile("pictures/clothes.png")) {
         std::cerr << "Error loading clothes.png" << std::endl;
         return EXIT_FAILURE;
     }
-
-    const int startX = 397; // Определяем константу для начальной X-координаты сетки на экране
-    const int startY = 99;  // Определяем константу для начальной Y-координаты сетки на экране
 
     std::random_device rd; // Создаем объект для получения случайных чисел из аппаратного источника (если доступен)
     std::mt19937 gen(rd()); // Создаем генератор случайных чисел Mersenne Twister, инициализируем его с помощью rd
@@ -309,14 +362,18 @@ int main()
         for (int x = 0; x < WIDTH_MAP; ++x) {
             if (tileMap[y][x] != 9) {
                 tileMap[y][x] = distrib(gen);
+
+                // Всегда устанавливаем текстуру и обновляем спрайт, даже для угловых элементов
                 tiles[y][x].sprite.setTexture(clothesTexture);
                 tiles[y][x].value = tileMap[y][x];
                 tiles[y][x].currentPos = sf::Vector2f(397 + x * squareSize, 99 + y * squareSize);
                 tiles[y][x].targetPos = tiles[y][x].currentPos;
-                updateTileSprite(tiles[y][x], clothesTexture); // Передаем текстуру одежд
+                tiles[y][x].updateSprite(clothesTexture); // Обновляем спрайт для всех тайлов
             }
         }
     }
+
+    findAndReplaceMatches(tileMap, tiles, clothesTexture);
 
     std::cout << "old map:" << std::endl; // Выводим в консоль метку "old map:"
     // Выводим результат в консоль (для проверки)
@@ -378,7 +435,7 @@ int main()
 
         while (window.pollEvent(event)) // Цикл обработки событий (закрытия окна, нажатия клавиш, мыши и т.д.)
         {
-            findAndReplaceMatches(tileMap, tiles, clothesTexture); // Вызываем функцию для поиска и замены совпадений в tileMap (логика игры). ВЫЗЫВАЕТСЯ ОЧЕНЬ ЧАСТО, возможно, нужно переместить
+            //findAndReplaceMatches(tileMap, tiles, clothesTexture); // Вызываем функцию для поиска и замены совпадений в tileMap (логика игры). ВЫЗЫВАЕТСЯ ОЧЕНЬ ЧАСТО, возможно, нужно переместить
 
             if (event.type == sf::Event::Closed) // Если событие - закрытие окна
             {
@@ -386,28 +443,37 @@ int main()
             }
 
             // Обработка нажатия кнопки мыши
-            else if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) 
+            else if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left)
             {
                 int mouseX = event.mouseButton.x;
                 int mouseY = event.mouseButton.y;
 
-                for (int i = 0; i < HEIGHT_MAP; ++i) 
+                bool foundSelected = false; // Флаг, показывающий, что тайл выбран
+
+                for (int i = 0; i < HEIGHT_MAP; ++i)
                 {
-                    for (int j = 0; j < WIDTH_MAP; ++j) 
+                    for (int j = 0; j < WIDTH_MAP; ++j)
                     {
-                        if (isSquareSelected(j, i, mouseX, mouseY, squareSize, 397, 99)) 
+                        if (isSquareSelected(j, i, mouseX, mouseY, squareSize, 397, 99))
                         {
                             selectedX = j;
                             selectedY = i;
                             dragging = true;
-                            break;
+
+                            // Увеличение масштаба выбранного спрайта
+                            tiles[i][j].targetScale = 1.2f; // Немного увеличиваем
+                            tiles[i][j].scaling = true; //включаем флаг
+
+                            foundSelected = true;
+                            break;  // Как только нашли тайл, выходим из внутреннего цикла
                         }
                     }
+                    if (foundSelected) break; // Если нашли тайл, выходим и из внешнего цикла
                 }
             }
 
             // Обработка отпускания кнопки мыши (завершение перетаскивания)
-            else if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging) 
+            else if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging)
             {
                 int mouseX = event.mouseButton.x;
                 int mouseY = event.mouseButton.y;
@@ -415,15 +481,33 @@ int main()
                 int targetX = (mouseX - 397) / squareSize;
                 int targetY = (mouseY - 99) / squareSize;
 
-                if (targetX >= 0 && targetX < WIDTH_MAP && targetY >= 0 && targetY < HEIGHT_MAP &&
-                    (abs(targetX - selectedX) + abs(targetY - selectedY)) == 1) 
+                // Проверка, что цель находится в пределах карты
+                if (targetX >= 0 && targetX < WIDTH_MAP && targetY >= 0 && targetY < HEIGHT_MAP)
                 {
-                    std::swap(tileMap[selectedY][selectedX], tileMap[targetY][targetX]);
-                    std::swap(tiles[selectedY][selectedX], tiles[targetY][targetX]);
-                    needsCheckMatches = true;
+                    // Проверка, что перемещение происходит только на одну клетку
+                    if ((abs(targetX - selectedX) + abs(targetY - selectedY)) == 1)
+                    {
+                        // Обмен значений в tileMap и tiles
+                        std::swap(tileMap[selectedY][selectedX], tileMap[targetY][targetX]);
+                        std::swap(tiles[selectedY][selectedX], tiles[targetY][targetX]);
+
+                        // Обновление позиции для анимации перемещения (ВАЖНО!)
+                        sf::Vector2f tempTarget = tiles[selectedY][selectedX].targetPos;
+                        tiles[selectedY][selectedX].targetPos = tiles[targetY][targetX].targetPos;
+                        tiles[targetY][targetX].targetPos = tempTarget;
+
+                        tiles[selectedY][selectedX].moving = true;
+                        tiles[targetY][targetX].moving = true;
+
+                        needsCheckMatches = true;
+                    }
                 }
 
-                //dragging = false; // Сбрасываем флаг перетаскивания
+                // Возвращение масштаба спрайта к исходному состоянию
+                tiles[selectedY][selectedX].targetScale = 1.0f;
+                tiles[selectedY][selectedX].scaling = true;
+
+                dragging = false; // Сбрасываем флаг перетаскивания
                 selectedX = -1;
                 selectedY = -1;
 
@@ -439,61 +523,62 @@ int main()
             }
         }
 
+
         // Обновление анимаций
         isAnimating = false;
         sf::Time deltaTime = clock.restart();
 
-        for (auto& row : tiles) 
+        for (auto& row : tiles)
         {
-            for (auto& tiles : row)
+            for (auto& tile : row)
             {
-                if (tiles.moving)
+                if (tile.moving)
                 {
                     // Анимация перемещения
-                    sf::Vector2f delta = tiles.targetPos - tiles.currentPos;
-                    tiles.currentPos += delta * (animationSpeed * deltaTime.asSeconds() * 60);
+                    sf::Vector2f delta = tile.targetPos - tile.currentPos;
+                    tile.currentPos += delta * (animationSpeed * deltaTime.asSeconds() * 60);
 
                     // Если тайл достиг целевой позиции, завершаем анимацию
-                    if (std::abs(delta.x) < 1.0f && std::abs(delta.y) < 1.0f) 
+                    if (std::abs(delta.x) < 1.0f && std::abs(delta.y) < 1.0f)
                     {
-                        tiles.currentPos = tiles.targetPos;
-                        tiles.moving = false;
+                        tile.currentPos = tile.targetPos;
+                        tile.moving = false;
                     }
                     isAnimating = true;
                 }
 
-                if (tiles.removing) 
+                if (tile.removing)
                 {
                     // Анимация удаления (уменьшение масштаба и прозрачности)
-                    tiles.scale -= removeAnimationSpeed * deltaTime.asSeconds() * 60;
-                    tiles.alpha = std::max(0.0f, tiles.alpha - 255.0f * removeAnimationSpeed * deltaTime.asSeconds() * 60);
+                    tile.scale -= removeAnimationSpeed * deltaTime.asSeconds() * 60;
+                    tile.alpha = std::max(0.0f, tile.alpha - 255.0f * removeAnimationSpeed * deltaTime.asSeconds() * 60);
 
                     // Если анимация завершена, переключаемся на анимацию появления
-                    if (tiles.scale <= 0.0f) 
+                    if (tile.scale <= 0.0f)
                     {
-                        tiles.removing = false;
-                        tiles.appearing = true;
-                        tiles.scale = 0.0f;
-                        tiles.alpha = 0.0f;
-                        updateTileSprite(tiles, clothesTexture);// Передаем текстуру одежды
+                        tile.removing = false;
+                        tile.appearing = true;
+                        tile.scale = 0.0f;
+                        tile.alpha = 0.0f;
+                        tile.updateSprite(clothesTexture);// Передаем текстуру одежды
                     }
                     isAnimating = true;
                 }
 
-                if (tiles.appearing) 
+                if (tile.appearing)
                 {
                     // Анимация появления (увеличение масштаба и прозрачности)
-                    tiles.scale += removeAnimationSpeed * deltaTime.asSeconds() * 60;
-                    tiles.alpha = std::min(255.0f, tiles.alpha + 255.0f * removeAnimationSpeed * deltaTime.asSeconds() * 60);
+                    tile.scale += removeAnimationSpeed * deltaTime.asSeconds() * 60;
+                    tile.alpha = std::min(255.0f, tile.alpha + 255.0f * removeAnimationSpeed * deltaTime.asSeconds() * 60);
 
                     // Если анимация завершена, сбрасываем флаг
-                    if (tiles.scale >= 1.0f) 
+                    if (tile.scale >= 1.0f)
                     {
-                        tiles.scale = 1.0f;
-                        tiles.alpha = 255.0f;
-                        tiles.appearing = false;
+                        tile.scale = 1.0f;
+                        tile.alpha = 255.0f;
+                        tile.appearing = false;
                     }
-                    updateTileSprite(tiles, clothesTexture); // Передаем текстуру одежды
+                    tile.updateSprite(clothesTexture); // Передаем текстуру одежды
                     isAnimating = true;
                 }
             }
@@ -501,8 +586,12 @@ int main()
 
         if (!isAnimating && needsCheckMatches)
         {
-            findAndReplaceMatches(tileMap, tiles, clothesTexture);
-            needsCheckMatches = false;
+            if (findAndReplaceMatches(tileMap, tiles, clothesTexture)) {
+                needsCheckMatches = true; // Если совпадения были найдены, нужно проверить еще раз
+            }
+            else {
+                needsCheckMatches = false; // Если совпадений не найдено, больше не проверяем
+            }
         }
 
         window.clear(); // Очищаем окно (заливаем черным цветом по умолчанию)
@@ -513,25 +602,6 @@ int main()
         window.draw(leftSidePanelSprite); // Рисуем спрайт левой панели
 
         window.draw(selectedSquare); // Рисуем квадратик выделения выбранной ячейки
-
-        //// Рисуем элементы одежды на игровом поле
-        //for (int i = 0; i < HEIGHT_MAP; ++i)
-        //{
-        //    for (int j = 0; j < WIDTH_MAP; ++j)
-        //    {
-        //        //tiles[i][j].sprite.setTexture(clothes1);
-        //        tiles[i][j].currentPos = sf::Vector2f(startX + j * squareSize, startY + i * squareSize);
-        //        tiles[i][j].targetPos = tiles[i][j].currentPos;
-        //        tiles[i][j].value = tileMap[i][j];
-        //        int tileIndex = tileMap[i][j] - 1; // Получаем индекс элемента одежды (учитываем, что значения в tileMap от 1 до 6)
-        //        if (tileIndex >= 0 && tileIndex < 6) // Проверяем, что индекс находится в допустимом диапазоне
-        //        {
-        //            s_clothes.setTextureRect(sf::IntRect(tileIndex * 64, 0, 64, 64)); // Устанавливаем область текстуры для спрайта одежды (выбираем нужный элемент)
-        //            s_clothes.setPosition(startX + j * 84, startY + i * 84); // Устанавливаем позицию спрайта одежды
-        //            window.draw(s_clothes); // Рисуем спрайт одежды
-        //        }
-        //    }
-        //}
 
         // Отрисовка тайлов
         for (const auto& row : tiles)
@@ -546,18 +616,6 @@ int main()
             }
         }
 
-        // Если выполняется перетаскивание, рисуем квадратик выделения рядом с мышью
-        if (dragging && selectedX != -1 && selectedY != -1)
-        {
-            sf::Vector2i mousePos = sf::Mouse::getPosition(window); // Получаем позицию мыши относительно окна
-            selectedSquare.setPosition((float)(mousePos.x - squareSize / 2), (float)(mousePos.y - squareSize / 2)); // Устанавливаем позицию квадратика выделения (центр квадратика под курсором)
-            window.draw(selectedSquare); // Рисуем квадратик выделения
-        }
-
         window.display(); // Отображаем содержимое окна
     }
 }
-
-//некорректно отображается тайл отностительно порядкового номера 
-//некорректна анимация движения тайла (она почти совсем пропала) частично проблема выходит из предыдущей
-//осмотр функции findAndReplaceMatches (возможно часть проблемы с анимацией имеют произхождение в данной функции)
