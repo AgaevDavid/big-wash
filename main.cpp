@@ -6,6 +6,13 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <thread>
+#include <mutex>
+#include <atomic>
+
+
+const int HEIGHT_MAP = 7; // Определяем константу для высоты игрового поля (7 клеток)
+const int WIDTH_MAP = 7;  // Определяем константу для ширины игрового поля (7 клеток)
 
 // Объявляем map, который связывает значения тайлов с информацией о текстуре
 const std::map<int, sf::IntRect> tileTextureMap = {
@@ -58,9 +65,9 @@ public:
             }
             sprite.setColor(sf::Color::White); // Восстанавливаем видимость
         }
-        else if (value == 9)
+        else if (value == 9 || value == 0) // Добавили проверку для value == 0
         {
-            // Угловые элементы: скрываем или устанавливаем другую текстуру
+            // Угловые элементы и пустые клетки: скрываем или устанавливаем другую текстуру
             sprite.setColor(sf::Color::Transparent);
         }
         else if (removing) {
@@ -88,39 +95,102 @@ private:
     std::uniform_int_distribution<> distrib;
 };
 
-bool findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, sf::Texture& clothesTexture)
+//класс для многопоточной проверки
+class MatchChecker {
+public:
+    MatchChecker(std::vector<std::vector<int>>& map,
+        std::vector<std::vector<Tile>>& tiles,
+        sf::Texture& texture)
+        : tileMap(map), tiles(tiles), clothesTexture(texture),
+        running(false), needsUpdate(false) {
+    }
+
+    void start() {
+        if (!running) {
+            running = true;
+            worker = std::thread(&MatchChecker::checkLoop, this);
+        }
+    }
+
+    void stop() {
+        running = false;
+        if (worker.joinable()) worker.join();
+    }
+
+    bool hasMatches() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return !currentMatches.empty();
+    }
+
+    std::vector<std::vector<bool>> getMatches() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return std::move(currentMatches);
+    }
+
+    void requestUpdate() {
+        std::lock_guard<std::mutex> lock(mtx);
+        needsUpdate = true;
+    }
+
+    static std::vector<std::vector<bool>> findMatches(const std::vector<std::vector<int>>& tileMap);
+
+private:
+    void checkLoop() {
+        while (running) {
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                if (needsUpdate) {
+                    currentMatches = MatchChecker::findMatches(tileMap); // Используем статический метод
+                    needsUpdate = false;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    std::thread worker;
+    std::atomic<bool> running;
+    std::mutex mtx;
+    bool needsUpdate;
+    std::vector<std::vector<bool>> currentMatches;
+
+    std::vector<std::vector<int>>& tileMap;
+    std::vector<std::vector<Tile>>& tiles;
+    sf::Texture& clothesTexture;
+};
+
+// Функция для поиска совпадений
+std::vector<std::vector<bool>> MatchChecker::findMatches(const std::vector<std::vector<int>>& tileMap)
 {
     int height = tileMap.size();
-    if (height == 0) return false;
-    int width = tileMap[0].size();
-    if (width == 0) return false;
-
+    int width = height > 0 ? tileMap[0].size() : 0;
     std::vector<std::vector<bool>> toRemove(height, std::vector<bool>(width, false));
     bool matchesFound = false;
 
     // Поиск горизонтальных совпадений
     for (int y = 0; y < height; ++y)
     {
-        int start = 0;
-        int matchLength = 1;
-        for (int x = 1; x <= width; ++x)
+        for (int x = 0; x < width - 2; ++x)
         {
-            if (x < width && tileMap[y][x] == tileMap[y][x - 1] && tileMap[y][x] != 0 && tileMap[y][x] != 9)
+            int value = tileMap[y][x];
+            if (value == 0 || value == 9) continue; // Пропускаем пустые и угловые элементы
+
+            // Проверяем, есть ли три одинаковых элемента подряд
+            if (tileMap[y][x + 1] == value && tileMap[y][x + 2] == value)
             {
-                matchLength++;
-            }
-            else
-            {
-                if (matchLength >= 3)
+                // Помечаем все три элемента для удаления
+                toRemove[y][x] = true;
+                toRemove[y][x + 1] = true;
+                toRemove[y][x + 2] = true;
+                matchesFound = true;
+
+                // Проверяем, есть ли больше трех одинаковых элементов
+                int k = x + 3;
+                while (k < width && tileMap[y][k] == value)
                 {
-                    for (int k = x - matchLength; k < x; ++k)
-                    {
-                        toRemove[y][k] = true;
-                        matchesFound = true;
-                    }
+                    toRemove[y][k] = true;
+                    k++;
                 }
-                start = x;
-                matchLength = 1;
             }
         }
     }
@@ -128,102 +198,87 @@ bool findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
     // Поиск вертикальных совпадений
     for (int x = 0; x < width; ++x)
     {
-        int start = 0;
-        int matchLength = 1;
-        for (int y = 1; y <= height; ++y)
+        for (int y = 0; y < height - 2; ++y)
         {
-            if (y < height && tileMap[y][x] == tileMap[y - 1][x] && tileMap[y][x] != 0 && tileMap[y][x] != 9)
+            int value = tileMap[y][x];
+            if (value == 0 || value == 9) continue; // Пропускаем пустые и угловые элементы
+
+            // Проверяем, есть ли три одинаковых элемента подряд
+            if (tileMap[y + 1][x] == value && tileMap[y + 2][x] == value)
             {
-                matchLength++;
-            }
-            else
-            {
-                if (matchLength >= 3)
+                // Помечаем все три элемента для удаления
+                toRemove[y][x] = true;
+                toRemove[y + 1][x] = true;
+                toRemove[y + 2][x] = true;
+                matchesFound = true;
+
+                // Проверяем, есть ли больше трех одинаковых элементов
+                int k = y + 3;
+                while (k < height && tileMap[k][x] == value)
                 {
-                    for (int k = y - matchLength; k < y; ++k)
-                    {
-                        toRemove[k][x] = true;
-                        matchesFound = true;
-                    }
+                    toRemove[k][x] = true;
+                    k++;
                 }
-                start = y;
-                matchLength = 1;
             }
         }
     }
 
-    if (!matchesFound)
-    {
-        return false;
-    }
+    return toRemove;
+}
 
-    // Создаем генератор случайных чисел и распределение
-    std::random_device rd; // Используем для получения случайного seed
-    std::mt19937 gen(rd()); // Mersenne Twister engine
-    std::uniform_int_distribution<> distrib(1, 6); // Распределение от 1 до 6
+// Функция для удаления совпадений и обновления тайлов
+bool removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, sf::Texture& clothesTexture, const std::vector<std::vector<bool>>& toRemove, MatchChecker& matchChecker)
+{
+    int height = tileMap.size();
+    int width = height > 0 ? tileMap[0].size() : 0;
 
-    for (int x = 0; x < width; ++x)
-    {
-        std::vector<int> splitIndices;
-        splitIndices.push_back(-1);
-        for (int y = 0; y < height; ++y)
-        {
-            if (tileMap[y][x] == 9)
-            {
-                splitIndices.push_back(y);
+    // Удаляем помеченные элементы (заменяем на 0)
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            if (toRemove[y][x]) {
+                tileMap[y][x] = 0;
+                tiles[y][x].value = 0;
+                tiles[y][x].removing = true;
             }
         }
-        splitIndices.push_back(height);
+    }
 
-        for (int i = 0; i < splitIndices.size() - 1; ++i)
-        {
-            int segStart = splitIndices[i] + 1;
-            int segEnd = splitIndices[i + 1];
-            int segLen = segEnd - segStart;
-            if (segLen <= 0) continue;
-
-            std::vector<int> survivingElements;
-            for (int y = segStart; y < segEnd; ++y)
-            {
-                if (!toRemove[y][x])
-                {
-                    survivingElements.push_back(tileMap[y][x]);
+    // Опускаем элементы вниз, сохраняя углы 9
+    for (int x = 0; x < width; ++x) {
+        int writeY = height - 1;
+        for (int y = height - 1; y >= 0; --y) {
+            // Пропускаем угловые 9
+            if (tileMap[y][x] == 9) {
+                if (y != writeY) {
+                    // Если 9 не на своем месте, перемещаем его
+                    tileMap[writeY][x] = 9;
+                    tiles[writeY][x].value = 9;
+                    tiles[writeY][x].targetPos = tiles[writeY][x].currentPos;
                 }
+                writeY--;
             }
-
-            int removedCount = segLen - survivingElements.size();
-            int writeY = segStart;
-
-            // Заполняем удаленные позиции нулями
-            for (int j = 0; j < removedCount; ++j, ++writeY)
-            {
-                tileMap[writeY][x] = 0;
-                tiles[writeY][x].value = 0;
-                tiles[writeY][x].removing = true; // Запуск анимации удаления
+            else if (tileMap[y][x] != 0) {
+                // Перемещаем неугловые элементы
+                tileMap[writeY][x] = tileMap[y][x];
+                tiles[writeY][x].value = tileMap[y][x];
+                tiles[writeY][x].moving = true;
+                writeY--;
             }
+        }
 
-            // Записываем выжившие элементы
-            for (int val : survivingElements)
-            {
-                if (writeY >= segEnd) break;
-                tileMap[writeY][x] = val;
-                tiles[writeY][x].value = val;
-                tiles[writeY][x].targetPos = sf::Vector2f(
-                    tiles[writeY][x].currentPos.x,
-                    tiles[writeY][x].currentPos.y
-                );
-                tiles[writeY][x].moving = true; // Запуск анимации перемещения
-                writeY++;
-            }
+        std::random_device rd; // Создаем объект для получения случайных чисел из аппаратного источника (если доступен)
+        std::mt19937 gen(rd()); // Создаем генератор случайных чисел Mersenne Twister, инициализируем его с помощью rd
+        std::uniform_int_distribution<> distrib(1, 6); // Создаем распределение случайных чисел в диапазоне от 1 до 6 (включительно)
 
-            // Заменяем нули на случайные числа 1-6
-            for (int y = segStart; y < segEnd; ++y)
-            {
-                if (tileMap[y][x] == 0)
-                {
-                    tileMap[y][x] = distrib(gen); // Используем distrib(gen) для генерации случайных чисел
+        // Заполняем оставшиеся нули, кроме углов
+        for (int y = writeY; y >= 0; --y) {
+            if (tileMap[y][x] == 0) {
+                // Проверяем, не является ли позиция угловой
+                bool isCorner = (y < 2 || y >= height - 2) && (x < 2 || x >= width - 2);
+                if (!isCorner) {
+                    tileMap[y][x] = distrib(gen);
                     tiles[y][x].value = tileMap[y][x];
-                    tiles[y][x].appearing = true; // Запуск анимации появления
+                    tiles[y][x].appearing = true;
                     tiles[y][x].updateSprite(clothesTexture);
                 }
             }
@@ -231,6 +286,36 @@ bool findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
     }
 
     return true;
+}
+
+// Обновленная функция findAndReplaceMatches
+bool findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, sf::Texture& clothesTexture, MatchChecker& matchChecker)
+{
+    // Находим совпадения
+    std::vector<std::vector<bool>> toRemove = MatchChecker::findMatches(tileMap);
+
+    // Если совпадений нет, возвращаем false
+    bool matchesFound = false;
+    for (const auto& row : toRemove)
+    {
+        for (bool remove : row)
+        {
+            if (remove)
+            {
+                matchesFound = true;
+                break;
+            }
+        }
+        if (matchesFound) break;
+    }
+
+    if (!matchesFound)
+    {
+        return false;
+    }
+
+    // Удаляем совпадения и обновляем тайлы
+    return removeMatches(tileMap, tiles, clothesTexture, toRemove, matchChecker); // Используем toRemove
 }
 
 // Функция проверки, находится ли точка (mouseX, mouseY) внутри квадрата
@@ -279,8 +364,6 @@ int main()
 {
     setlocale(LC_ALL, "RUSSIAN"); // Устанавливаем русскую локаль для корректного отображения текста
 
-    const int HEIGHT_MAP = 7; // Определяем константу для высоты игрового поля (7 клеток)
-    const int WIDTH_MAP = 7;  // Определяем константу для ширины игрового поля (7 клеток)
     const int squareSize = 84;
     const float animationSpeed = 0.15f;
     const float removeAnimationSpeed = 0.1f;
@@ -343,13 +426,13 @@ int main()
     std::vector<std::vector<Tile>> tiles(HEIGHT_MAP, std::vector<Tile>(WIDTH_MAP));
     std::vector<std::vector<int>> tileMap(HEIGHT_MAP, std::vector<int>(WIDTH_MAP));
 
-    // Заполняем углы значением 9
+    //Заполняем углы значением 9
     tileMap[0][0] = 9;          // Левый верхний угол
     tileMap[0][1] = 9;
-    tileMap[0][WIDTH_MAP - 2] = 9; // Правый верхний угол
-    tileMap[0][WIDTH_MAP - 1] = 9; // Правый верхний угол
     tileMap[1][0] = 9;
+    tileMap[0][WIDTH_MAP - 1] = 9; // Правый верхний угол
     tileMap[1][WIDTH_MAP - 1] = 9; // Правый верхний угол
+    tileMap[0][WIDTH_MAP - 2] = 9; // Правый верхний угол
     tileMap[HEIGHT_MAP - 1][0] = 9;    // Левый нижний угол
     tileMap[HEIGHT_MAP - 1][1] = 9;
     tileMap[HEIGHT_MAP - 1][WIDTH_MAP - 2] = 9;// Правый нижний угол
@@ -373,7 +456,6 @@ int main()
         }
     }
 
-    findAndReplaceMatches(tileMap, tiles, clothesTexture);
 
     std::cout << "old map:" << std::endl; // Выводим в консоль метку "old map:"
     // Выводим результат в консоль (для проверки)
@@ -386,7 +468,11 @@ int main()
         std::cout << std::endl;
     }
 
-    sf::Time;
+    // После создания tileMap и tiles
+    MatchChecker matchChecker(tileMap, tiles, clothesTexture);
+    matchChecker.start();
+
+    //sf::Time;
     sf::Clock clock;
 
     bool isAnimating = false; // Флаг, указывающий, выполняется ли анимация
@@ -433,9 +519,22 @@ int main()
     {
         sf::Event event; // Создаем объект события для обработки событий окна
 
+        if (needsCheckMatches) 
+        {
+            matchChecker.requestUpdate();
+            needsCheckMatches = false;
+        }
+
+        if (matchChecker.hasMatches()) 
+        {
+            auto matches = matchChecker.getMatches();
+            removeMatches(tileMap, tiles, clothesTexture, matches, matchChecker);
+            needsCheckMatches = true; // Проверить снова после изменений
+        }
+
         while (window.pollEvent(event)) // Цикл обработки событий (закрытия окна, нажатия клавиш, мыши и т.д.)
         {
-            //findAndReplaceMatches(tileMap, tiles, clothesTexture); // Вызываем функцию для поиска и замены совпадений в tileMap (логика игры). ВЫЗЫВАЕТСЯ ОЧЕНЬ ЧАСТО, возможно, нужно переместить
+            findAndReplaceMatches(tileMap, tiles, clothesTexture, matchChecker); // Вызываем функцию для поиска и замены совпадений в tileMap (логика игры). ВЫЗЫВАЕТСЯ ОЧЕНЬ ЧАСТО, возможно, нужно переместить
 
             if (event.type == sf::Event::Closed) // Если событие - закрытие окна
             {
@@ -503,6 +602,17 @@ int main()
                     }
                 }
 
+                std::cout << "new map:" << std::endl; // Выводим в консоль метку "old map:"
+                // Выводим результат в консоль (для проверки)
+                for (int y = 0; y < HEIGHT_MAP; ++y)
+                {
+                    for (int x = 0; x < WIDTH_MAP; ++x)
+                    {
+                        std::cout << tileMap[y][x] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+
                 // Возвращение масштаба спрайта к исходному состоянию
                 tiles[selectedY][selectedX].targetScale = 1.0f;
                 tiles[selectedY][selectedX].scaling = true;
@@ -511,15 +621,6 @@ int main()
                 selectedX = -1;
                 selectedY = -1;
 
-                std::cout << "new map:" << std::endl; // Выводим в консоль метку "new map:"
-                for (int y = 0; y < HEIGHT_MAP; ++y) // Цикл по строкам игрового поля
-                {
-                    for (int x = 0; x < WIDTH_MAP; ++x) // Цикл по столбцам игрового поля
-                    {
-                        std::cout << tileMap[y][x] << " "; // Выводим значение ячейки и пробел
-                    }
-                    std::cout << std::endl; // Переходим на новую строку после каждой строки
-                }
             }
         }
 
@@ -536,7 +637,7 @@ int main()
                 {
                     // Анимация перемещения
                     sf::Vector2f delta = tile.targetPos - tile.currentPos;
-                    tile.currentPos += delta * (animationSpeed * deltaTime.asSeconds() * 60);
+                    tile.currentPos += delta * (animationSpeed * deltaTime.asSeconds() * 60); 
 
                     // Если тайл достиг целевой позиции, завершаем анимацию
                     if (std::abs(delta.x) < 1.0f && std::abs(delta.y) < 1.0f)
@@ -551,7 +652,7 @@ int main()
                 {
                     // Анимация удаления (уменьшение масштаба и прозрачности)
                     tile.scale -= removeAnimationSpeed * deltaTime.asSeconds() * 60;
-                    tile.alpha = std::max(0.0f, tile.alpha - 255.0f * removeAnimationSpeed * deltaTime.asSeconds() * 60);
+                    tile.alpha = std::max(0.0f, tile.alpha - 255.0f * removeAnimationSpeed * deltaTime.asSeconds() * 30);
 
                     // Если анимация завершена, переключаемся на анимацию появления
                     if (tile.scale <= 0.0f)
@@ -584,15 +685,14 @@ int main()
             }
         }
 
-        if (!isAnimating && needsCheckMatches)
-        {
-            if (findAndReplaceMatches(tileMap, tiles, clothesTexture)) {
-                needsCheckMatches = true; // Если совпадения были найдены, нужно проверить еще раз
-            }
-            else {
-                needsCheckMatches = false; // Если совпадений не найдено, больше не проверяем
-            }
-        }
+        if (!isAnimating && needsCheckMatches) {
+    if (findAndReplaceMatches(tileMap, tiles, clothesTexture, matchChecker)) {
+        needsCheckMatches = true;
+    }
+    else {
+        needsCheckMatches = false;
+    }
+}
 
         window.clear(); // Очищаем окно (заливаем черным цветом по умолчанию)
         window.draw(sprite); // Рисуем спрайт фона
@@ -618,4 +718,7 @@ int main()
 
         window.display(); // Отображаем содержимое окна
     }
+
+    matchChecker.stop();
+
 }
