@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <future>
 
 const int HEIGHT_MAP = 7;
 const int WIDTH_MAP = 7;
@@ -19,7 +20,8 @@ const std::map<int, sf::IntRect> tileTextureMap = {
     {6, sf::IntRect(5 * 64, 0, 64, 64)}
 };
 
-enum class TileState {
+enum class TileState 
+{
     Idle,
     Moving,
     Removing,
@@ -27,7 +29,8 @@ enum class TileState {
     Falling
 };
 
-class AnimationHandler {
+class AnimationHandler 
+{
 public:
     AnimationHandler() :
         currentPos(0, 0),
@@ -39,68 +42,90 @@ public:
     {
     }
 
-    void update(float deltaTime) {
-        switch (state) {
-        case TileState::Moving: updateMoving(deltaTime); break;
-        case TileState::Removing: updateRemoving(deltaTime); break;
-        case TileState::Appearing: updateAppearing(deltaTime); break;
-        case TileState::Falling: updateFalling(deltaTime); break; // Обработка падения
-        default: break;
+    void update(float deltaTime) 
+    {
+        if (state != TileState::Idle) 
+        {
+            // Обновляем анимацию только для активных тайлов
+            switch (state) {
+            case TileState::Moving: updateMoving(deltaTime); break;
+            case TileState::Removing: updateRemoving(deltaTime); break;
+            case TileState::Appearing: updateAppearing(deltaTime); break;
+            case TileState::Falling: updateFalling(deltaTime); break;
+            default: break;
+            }
         }
     }
 
-    void startMoving(const sf::Vector2f& newTarget) {
+    void startMoving(const sf::Vector2f& newTarget) 
+    {
         targetPos = newTarget;
         state = TileState::Moving;
     }
 
-    void startRemoving() {
+    void startRemoving() 
+    {
         state = TileState::Removing;
         scale = 1.0f;
         alpha = 255.0f;
     }
 
-    void startAppearing() {
+    void startAppearing()
+    {
         state = TileState::Appearing;
         scale = 0.0f;
         alpha = 0.0f;
     }
 
-    void startFalling(const sf::Vector2f& newTarget) {
+    void startFalling(const sf::Vector2f& newTarget) 
+    {
         targetPos = newTarget;
         state = TileState::Falling;
     }
 
-    void setPosition(float x, float y) {
+    void setPosition(float x, float y) 
+    {
         currentPos = { x, y };
         targetPos = { x, y };
     }
 
-    void setPosition(const sf::Vector2f& position) {
+    void setPosition(const sf::Vector2f& position) 
+    {
         currentPos = position;
         targetPos = position;
     }
+
+    void setScale(float scaleX, float scaleY) {
+        this->scaleX = scaleX;
+        this->scaleY = scaleY;
+    }
+
+    float getScaleX() const { return scaleX; }
+    float getScaleY() const { return scaleY; }
 
     sf::Vector2f getPosition() const { return currentPos; }
     float getScale() const { return scale; }
     float getAlpha() const { return alpha; }
     TileState getState() const { return state; }
 
+
     //void setPosition(const sf::Vector2f& pos) { currentPos = pos; }
     void setTargetPosition(const sf::Vector2f& pos) { targetPos = pos; }
     bool isFinished() const { return state == TileState::Idle; } // Добавлено
 
 private:
-    void updateMoving(float deltaTime) {
+    void updateMoving(float deltaTime) 
+    {
         sf::Vector2f delta = targetPos - currentPos;
         currentPos += delta * (2.0f * deltaTime); // Скорость движения 1.0, можно настроить
-        if (std::abs(delta.x) < 2.0f && std::abs(delta.y) < 1.0f) {
+        if (std::abs(delta.x) < 2.0f && std::abs(delta.y) < 2.0f) {
             currentPos = targetPos;
             state = TileState::Idle;
         }
     }
 
-    void updateRemoving(float deltaTime) {
+    void updateRemoving(float deltaTime) 
+    {
         scale = std::max(0.0f, scale - 2.0f * deltaTime); // Скорость исчезновения 0.5, можно настроить
         alpha = std::max(0.0f, alpha - 255.0f * 2.0f * deltaTime); // Скорость исчезновения альфы 0.5, можно настроить
         if (scale <= 0.0f) {
@@ -110,20 +135,24 @@ private:
         }
     }
 
-    void updateAppearing(float deltaTime) {
+    void updateAppearing(float deltaTime)
+    {
         scale = std::min(1.0f, scale + 1.0f * deltaTime); // Скорость появления 1.0, можно настроить
         alpha = std::min(255.0f, alpha + 255.0f * 1.0f * deltaTime); // Скорость появления альфы 1.0, можно настроить
-        if (scale >= 1.0f) {
+        if (scale >= 1.0f) 
+        {
             scale = 1.0f; // Ensure it's exactly 1
             alpha = 255.0f; // Ensure it's exactly 255
             state = TileState::Idle;
         }
     }
 
-    void updateFalling(float deltaTime) {
+    void updateFalling(float deltaTime) 
+    {
         sf::Vector2f delta = targetPos - currentPos;
         currentPos.y += fallSpeed * deltaTime;  // Движение только по Y
-        if (currentPos.y >= targetPos.y) {  // Используем >=, чтобы избежать проскакивания цели
+        if (currentPos.y >= targetPos.y) 
+        {  // Используем >=, чтобы избежать проскакивания цели
             currentPos = targetPos;
             state = TileState::Idle;
         }
@@ -135,46 +164,84 @@ private:
     float alpha;
     TileState state;
     float fallSpeed; // Скорость падения
+    float scaleX = 1.0f;
+    float scaleY = 1.0f;
 };
 
-class Tile {
+class Tile 
+{
 public:
-    Tile() : value(0) {}
+    Tile() : value(0) {
+        sprite.setOrigin(sprite.getLocalBounds().width / 2, sprite.getLocalBounds().height / 2);
+    }
 
-    void setTexture(const sf::Texture& texture) {
+    void setTexture(const sf::Texture& texture) 
+    {
         sprite.setTexture(texture);
     }
 
-    void setValue(int val) {
+    void setValue(int val) 
+    {
         value = val;
     }
 
-    void setPosition(float x, float y) {
+    void setPosition(float x, float y) 
+    {
+        // Учитываем точку привязки спрайта
+        sprite.setPosition(x + sprite.getLocalBounds().width / 2, y + sprite.getLocalBounds().height / 2);
         animator.setPosition({ x, y });
         animator.setTargetPosition({ x, y });
     }
 
     void update(float deltaTime) {
         animator.update(deltaTime);
+
+        if (isSelected) {
+            // Анимация пульсации
+            float time = selectTimer.getElapsedTime().asSeconds();
+            float scale = 1.0f + 0.1f * sin(time * 10.0f); // Пульсация масштаба
+            animator.setScale(scale, scale);
+
+            // Случайное смещение для эффекта дрожи
+            float shakeX = (rand() % 5 - 2) * 0.5f;
+            float shakeY = (rand() % 5 - 2) * 0.5f;
+            sprite.setPosition(animator.getPosition() + sf::Vector2f(shakeX, shakeY));
+        }
+
         applyVisualState();
     }
 
-    void applyVisualState() {
+    void applyVisualState() 
+    {
         sprite.setPosition(animator.getPosition());
-        sprite.setScale(animator.getScale(), animator.getScale());
+        sprite.setScale(animator.getScaleX(), animator.getScaleY());
         sprite.setColor(sf::Color(255, 255, 255, static_cast<sf::Uint8>(animator.getAlpha())));
     }
 
-    void startMoving(const sf::Vector2f& target) {
+    void startMoving(const sf::Vector2f& target) 
+    {
         animator.startMoving(target);
     }
 
-    void startRemoving() {
+    void startRemoving() 
+    {
         animator.startRemoving();
     }
 
-    void startAppearing() {
+    void startAppearing() 
+    {
         animator.startAppearing();
+    }
+
+    void startSelectAnimation() {
+        isSelected = true;
+        selectTimer.restart();
+    }
+
+    void stopSelectAnimation() {
+        isSelected = false;
+        animator.setScale(1.0f, 1.0f);
+        sprite.setPosition(animator.getPosition());
     }
 
     AnimationHandler& getAnimator() { return animator; }
@@ -184,85 +251,106 @@ public:
     int getValue() const { return value; }
     TileState getState() const { return animator.getState(); }
     sf::Vector2f getPosition() const { return animator.getPosition(); }
-    void startFalling(const sf::Vector2f& target) {
+    void startFalling(const sf::Vector2f& target) 
+    {
         animator.startFalling(target);
     }
-    void setFallPosition(const sf::Vector2f& target) {
+    void setFallPosition(const sf::Vector2f& target) 
+    {
         animator.setPosition(target);
     }
     
-
     sf::Sprite sprite;
+    bool isSelected = false;
+    sf::Clock selectTimer;
 
 private:
     int value;
     AnimationHandler animator;
 };
 
-struct LastMove {
+struct LastMove 
+{
     int selectedX = -1, selectedY = -1;
     int targetX = -1, targetY = -1;
 };
 
-bool isSquareSelected(int x, int y, int mouseX, int mouseY, int squareSize, int startX, int startY) {
+void revertSwap(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, LastMove& lastMove) {
+    // Откатываем обмен
+    std::swap(tiles[lastMove.selectedY][lastMove.selectedX], tiles[lastMove.targetY][lastMove.targetX]);
+    std::swap(tileMap[lastMove.selectedY][lastMove.selectedX], tileMap[lastMove.targetY][lastMove.targetX]);
+
+    // Возвращаем тайлы на их исходные позиции
+    tiles[lastMove.selectedY][lastMove.selectedX].startMoving(tiles[lastMove.selectedY][lastMove.selectedX].getPosition());
+    tiles[lastMove.targetY][lastMove.targetX].startMoving(tiles[lastMove.targetY][lastMove.targetX].getPosition());
+}
+
+bool isSquareSelected(int x, int y, int mouseX, int mouseY, int squareSize, int startX, int startY) 
+{
     return mouseX >= startX + x * squareSize && mouseX < startX + (x + 1) * squareSize &&
         mouseY >= startY + y * squareSize && mouseY < startY + (y + 1) * squareSize;
 }
 
-void updateTileSprite(Tile& tile, const sf::Texture& clothesTexture) {
-    if (tile.getValue() >= 1 && tile.getValue() <= 6) {
-        if (tile.sprite.getTexture() != &clothesTexture) {
+void updateTileSprite(Tile& tile, const sf::Texture& clothesTexture) 
+{
+    if (tile.getValue() >= 1 && tile.getValue() <= 6) 
+    {
+        if (tile.sprite.getTexture() != &clothesTexture) 
+        {
             tile.sprite.setTexture(clothesTexture);
         }
         auto it = tileTextureMap.find(tile.getValue());
-        if (it != tileTextureMap.end()) {
+        if (it != tileTextureMap.end()) 
+        {
             tile.sprite.setTextureRect(it->second);
         }
-        else {
+        else 
+        {
             std::cerr << "Warning: No texture info for value " << tile.getValue() << std::endl;
         }
     }
-    else if (tile.getValue() == 9) {
+    else if (tile.getValue() == 9) 
+    {
         tile.sprite.setColor(sf::Color::Transparent);
     }
 }
 
 // Поиск совпадений
-std::vector<std::vector<bool>> findMatches(const std::vector<std::vector<int>>& tileMap) {
+std::vector<std::vector<bool>> findMatches(const std::vector<std::vector<int>>& tileMap)
+{
     int height = tileMap.size();
     int width = tileMap[0].size();
     std::vector<std::vector<bool>> toRemove(height, std::vector<bool>(width, false));
 
     // Горизонтальные совпадения
-    for (int y = 0; y < height; ++y) {
-        int matchStart = 0;
-        for (int x = 1; x <= width; ++x) {
-            if (x < width && tileMap[y][x] == tileMap[y][x - 1] && tileMap[y][x] != 0 && tileMap[y][x] != 9)
-                continue;
-
-            int length = x - matchStart;
-            if (length >= 3)
-                for (int k = matchStart; k < x; ++k)
-                    toRemove[y][k] = true;
-
-            matchStart = x;
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width - 2; ++x) 
+        {
+            int value = tileMap[y][x];
+            if (value != 0 && value != 9 &&
+                value == tileMap[y][x + 1] &&
+                value == tileMap[y][x + 2]) {
+                toRemove[y][x] = true;
+                toRemove[y][x + 1] = true;
+                toRemove[y][x + 2] = true;
+            }
         }
     }
 
-    // Поиск вертикальных совпадений
-    for (int x = 0; x < width; ++x) {
-        int matchLength = 1;
-        for (int y = 1; y <= height; ++y) {
-            if (y < height && tileMap[y][x] == tileMap[y - 1][x] && tileMap[y][x] != 0 && tileMap[y][x] != 9) {
-                matchLength++;
-            }
-            else {
-                if (matchLength >= 3) {
-                    for (int k = y - matchLength; k < y; ++k) {
-                        toRemove[k][x] = true;
-                    }
-                }
-                matchLength = 1;
+    // Вертикальные совпадения
+    for (int x = 0; x < width; ++x) 
+    {
+        for (int y = 0; y < height - 2; ++y) 
+        {
+            int value = tileMap[y][x];
+            if (value != 0 && value != 9 &&
+                value == tileMap[y + 1][x] &&
+                value == tileMap[y + 2][x]) 
+            {
+                toRemove[y][x] = true;
+                toRemove[y + 1][x] = true;
+                toRemove[y + 2][x] = true;
             }
         }
     }
@@ -271,13 +359,17 @@ std::vector<std::vector<bool>> findMatches(const std::vector<std::vector<int>>& 
 }
 
 // Удаление совпадений
-void removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, const std::vector<std::vector<bool>>& toRemove) {
+void removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, const std::vector<std::vector<bool>>& toRemove) 
+{
     int height = tileMap.size();
     int width = tileMap[0].size();
 
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            if (toRemove[y][x]) {
+    for (int y = 0; y < height; ++y) 
+    {
+        for (int x = 0; x < width; ++x) 
+        {
+            if (toRemove[y][x]) 
+            {
                 tiles[y][x].startRemoving();
                 tileMap[y][x] = 0;
             }
@@ -288,12 +380,17 @@ void removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vect
 // Применение гравитации (падение тайлов)
 void applyGravity(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles,
     int width, int height, float tileSize, const sf::Texture& clothesTex,
-    int startX, int startY) {
-    for (int x = 0; x < width; ++x) {
+    int startX, int startY) 
+{
+    for (int x = 0; x < width; ++x) 
+    {
         int writeY = height - 1;
-        for (int y = height - 1; y >= 0; --y) {
-            if (tileMap[y][x] != 0 && tileMap[y][x] != 9) {
-                if (writeY != y) {
+        for (int y = height - 1; y >= 0; --y) 
+        {
+            if (tileMap[y][x] != 0 && tileMap[y][x] != 9) 
+            {
+                if (writeY != y) 
+                {
                     int value = tileMap[y][x];
                     tileMap[writeY][x] = value;
                     tileMap[y][x] = 0;
@@ -310,7 +407,8 @@ void applyGravity(std::vector<std::vector<int>>& tileMap, std::vector<std::vecto
                 }
                 writeY--;
             }
-            else if (tileMap[y][x] == 9) {
+            else if (tileMap[y][x] == 9) 
+            {
                 writeY = y - 1;
             }
         }
@@ -328,24 +426,30 @@ void fillEmptyTiles(std::vector<std::vector<int>>& tileMap,
     float tileSize,
     const sf::Texture& clothesTex,
     int startX, int startY,
-    const std::vector<sf::Vector2i>& corners) {
+    const std::vector<sf::Vector2i>& corners) 
+{
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> distrib(1, 6);
 
-    for (int x = 0; x < width; ++x) {
-        for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) 
+    {
+        for (int y = 0; y < height; ++y) 
+        {
             // Заполняем только пустые ячейки (0), которые НЕ являются угловыми (9)
             if (tileMap[y][x] == 0) {
                 bool isCorner = false;
-                for (const auto& corner : corners) {
-                    if (corner.x == x && corner.y == y) {
+                for (const auto& corner : corners) 
+                {
+                    if (corner.x == x && corner.y == y) 
+                    {
                         isCorner = true;
                         break;
                     }
                 }
 
-                if (!isCorner) {
+                if (!isCorner) 
+                {
                     int newValue = distrib(gen);
                     tileMap[y][x] = newValue;
                     tiles[y][x].setValue(newValue);
@@ -360,7 +464,8 @@ void fillEmptyTiles(std::vector<std::vector<int>>& tileMap,
 
                     updateTileSprite(tiles[y][x], clothesTex);
                 }
-                else {
+                else 
+                {
                     // Убедимся, что угловые элементы остаются 9
                     tileMap[y][x] = 9;
                     tiles[y][x].setValue(9);
@@ -372,20 +477,36 @@ void fillEmptyTiles(std::vector<std::vector<int>>& tileMap,
 }
 
 
-bool hasMatches(const std::vector<std::vector<int>>& tileMap) {
-    auto toRemove = findMatches(tileMap);
-    for (const auto& row : toRemove) {
-        for (bool val : row) {
-            if (val) return true;
+bool hasMatches(const std::vector<std::vector<int>>& tileMap) 
+{
+    // Оптимизированная проверка без полного поиска
+    for (int y = 0; y < HEIGHT_MAP; y++) 
+    {
+        for (int x = 0; x < WIDTH_MAP - 2; x++) 
+        {
+            if (tileMap[y][x] == tileMap[y][x + 1] &&
+                tileMap[y][x] == tileMap[y][x + 2] &&
+                tileMap[y][x] != 0 && tileMap[y][x] != 9) return true;
+        }
+    }
+
+    for (int x = 0; x < WIDTH_MAP; x++) 
+    {
+        for (int y = 0; y < HEIGHT_MAP - 2; y++) 
+        {
+            if (tileMap[y][x] == tileMap[y + 1][x] &&
+                tileMap[y][x] == tileMap[y + 2][x] &&
+                tileMap[y][x] != 0 && tileMap[y][x] != 9) return true;
         }
     }
     return false;
 }
 
 // Основная функция для обработки совпадений
-void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, int width, int height, float tileSize, const sf::Texture& clothesTex, int startX, int startY, const std::vector<sf::Vector2i>& corners) {
-    
-    while (true) {
+void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, int width, int height, float tileSize, const sf::Texture& clothesTex, int startX, int startY, const std::vector<sf::Vector2i>& corners)
+{
+    while (true) 
+    {
         auto toRemove = findMatches(tileMap);
         bool hasMatches = false;
         for (const auto& row : toRemove)
@@ -411,7 +532,80 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
     }
 }
 
-sf::Color hexToColor(const std::string& hexColor) {
+// Поиск возможных совпадений
+// Поиск возможных совпадений (работает с копией матрицы)
+std::vector<std::vector<sf::Vector2i>> findPossibleMatches(const std::vector<std::vector<int>>& tileMap) 
+{
+    std::vector<std::vector<sf::Vector2i>> matches;
+    int height = tileMap.size();
+    int width = tileMap[0].size();
+
+    // Создаем копию матрицы для тестирования
+    auto tempMap = tileMap;
+
+    // Проверка горизонтальных свапов
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width - 1; x++) 
+        {
+            if (tempMap[y][x] == 9 || tempMap[y][x + 1] == 9) continue; // Пропускаем угловые
+
+            std::swap(tempMap[y][x], tempMap[y][x + 1]);
+            if (hasMatches(tempMap))
+            {
+                matches.push_back({ {x, y}, {x + 1, y} });
+            }
+            std::swap(tempMap[y][x], tempMap[y][x + 1]); // Возвращаем обратно
+        }
+    }
+
+    // Проверка вертикальных свапов
+    for (int x = 0; x < width; x++)
+    {
+        for (int y = 0; y < height - 1; y++) 
+        {
+            if (tempMap[y][x] == 9 || tempMap[y + 1][x] == 9) continue;
+
+            std::swap(tempMap[y][x], tempMap[y + 1][x]);
+            if (hasMatches(tempMap)) 
+            {
+                matches.push_back({ {x, y}, {x, y + 1} });
+            }
+            std::swap(tempMap[y][x], tempMap[y + 1][x]);
+        }
+    }
+
+    return matches;
+}
+
+// Перемешивание доски
+void shuffleBoard(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles,
+    const sf::Texture& clothesTex, int startX, int startY, int squareSize) 
+{
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(1, 6);
+
+    do 
+    {
+        // Перемешиваем все не угловые тайлы
+        for (int y = 0; y < HEIGHT_MAP; y++) 
+        {
+            for (int x = 0; x < WIDTH_MAP; x++) 
+            {
+                if (tileMap[y][x] != 9) 
+                {
+                    tileMap[y][x] = distrib(gen);
+                    tiles[y][x].setValue(tileMap[y][x]);
+                    updateTileSprite(tiles[y][x], clothesTex);
+                }
+            }
+        }
+    } while (hasMatches(tileMap) || !findPossibleMatches(tileMap).empty());
+}
+
+sf::Color hexToColor(const std::string& hexColor) 
+{
     std::string color = hexColor;
     if (color[0] == '#') color.erase(0, 1);
     if (color.length() != 6) return sf::Color::Black;
@@ -425,7 +619,8 @@ sf::Color hexToColor(const std::string& hexColor) {
     return sf::Color(r, g, b);
 }
 
-enum class GameState {
+enum class GameState
+{
     Playing,
     Swapping,
     RemovingMatches,
@@ -433,7 +628,9 @@ enum class GameState {
     FillingEmptyTiles
 };
 
-int main() {
+
+int main() 
+{
     setlocale(LC_ALL, "RUSSIAN");
     const int squareSize = 84;
     sf::RenderWindow window(sf::VideoMode(1366, 770), "Big wash");
@@ -456,6 +653,8 @@ int main() {
     leftPanel.setPosition(10, 100);
     mainPanel.setPosition(365, 67);
 
+    sf::Vector2i selectedTile = { -1, -1 }; // Координаты выделенного тайла
+
     // Initialize game grid
     std::vector<std::vector<int>> tileMap(HEIGHT_MAP, std::vector<int>(WIDTH_MAP, 0));
     std::vector<std::vector<Tile>> tiles(HEIGHT_MAP, std::vector<Tile>(WIDTH_MAP));
@@ -471,8 +670,10 @@ int main() {
 
     const int startX = 397;
     const int startY = 99;
-    for (int y = 0; y < HEIGHT_MAP; ++y) {
-        for (int x = 0; x < WIDTH_MAP; ++x) {
+    for (int y = 0; y < HEIGHT_MAP; ++y) 
+    {
+        for (int x = 0; x < WIDTH_MAP; ++x) 
+        {
             if (tileMap[y][x] == 0) tileMap[y][x] = distrib(gen);
             tiles[y][x].setValue(tileMap[y][x]);
             tiles[y][x].setTexture(clothesTex);
@@ -492,6 +693,9 @@ int main() {
         std::cout << std::endl;
     }
 
+    auto future = std::async(std::launch::async, findMatches, std::ref(tileMap));
+    auto toRemove = future.get();
+
     // Game state
     LastMove lastMove;
     bool dragging = false;
@@ -500,9 +704,13 @@ int main() {
     sf::Font font;
     sf::Text text;
     GameState gameState = GameState::Playing; // Initial game state
-    std::vector<std::vector<bool>> toRemove(HEIGHT_MAP, std::vector<bool>(WIDTH_MAP, false));
+    sf::Clock idleTimer; //таймер бездействия
+    std::vector<sf::Vector2i> highlightedTiles; //Подсвеченыые тайлы
+    bool isBoardValid = true; //Флаг валидности доски
+    idleTimer.restart(); // Запускаем таймер при старте
 
-    if (!font.loadFromFile("fonts/fredfredburgerheadline.otf")) {
+    if (!font.loadFromFile("fonts/fredfredburgerheadline.otf")) 
+    {
         std::cerr << "Failed to load font" << std::endl;
         return EXIT_FAILURE;
     }
@@ -513,25 +721,80 @@ int main() {
     text.setOutlineThickness(3);
     text.setOutlineColor(hexToColor("#6b46d5"));
 
-    while (window.isOpen()) {
+    while (window.isOpen())
+    {
         sf::Event event;
         sf::Time deltaTime = clock.restart();
 
-        // проверка на совпадения
+        // Проверка на совпадения
         if (hasMatches(tileMap))
         {
             findAndReplaceMatches(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY, corners);
-           
         }
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) {
+
+        if (idleTimer.getElapsedTime().asSeconds() > 10.0f && isBoardValid) 
+        {
+            auto possibleMatches = findPossibleMatches(tileMap);
+
+            if (!possibleMatches.empty())
+            {
+                // Берем первый найденный возможный ход
+                highlightedTiles = possibleMatches[0];
+
+                // Подсвечиваем тайлы
+                for (auto& pos : highlightedTiles) 
+                {
+                    tiles[pos.y][pos.x].startSelectAnimation();
+                }
+            }
+            else 
+            {
+                // Перемешиваем доску если нет возможных ходов
+                shuffleBoard(tileMap, tiles, clothesTex, startX, startY, squareSize);
+                isBoardValid = false;
+            }
+            idleTimer.restart();
+        }
+
+        if (hasMatches(tileMap))
+        {
+            findAndReplaceMatches(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY, corners);
+        }
+
+        if (!highlightedTiles.empty() && gameState == GameState::Playing) 
+        {
+            // Сбрасываем подсветку
+            for (auto& pos : highlightedTiles) 
+            {
+                tiles[pos.y][pos.x].stopSelectAnimation();
+            }
+            highlightedTiles.clear();
+            isBoardValid = true;
+        }
+
+        // Обработка событий
+        while (window.pollEvent(event))
+        {
+            if (event.type == sf::Event::Closed)
+            {
                 window.close();
             }
-            else if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && gameState == GameState::Playing) {
+            else if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && gameState == GameState::Playing)
+            {
                 sf::Vector2i mousePos = sf::Mouse::getPosition(window);
-                for (int y = 0; y < HEIGHT_MAP; ++y) {
-                    for (int x = 0; x < WIDTH_MAP; ++x) {
-                        if (isSquareSelected(x, y, mousePos.x, mousePos.y, squareSize, startX, startY)) {
+                for (int y = 0; y < HEIGHT_MAP; ++y)
+                {
+                    for (int x = 0; x < WIDTH_MAP; ++x)
+                    {
+                        if (isSquareSelected(x, y, mousePos.x, mousePos.y, squareSize, startX, startY))
+                        {
+                            // Сбрасываем предыдущее выделение
+                            if (selectedTile.x != -1) {
+                                tiles[selectedTile.y][selectedTile.x].stopSelectAnimation();
+                            }
+
+                            selectedTile = { x, y };
+                            tiles[y][x].startSelectAnimation();
                             selectedX = x;
                             selectedY = y;
                             dragging = true;
@@ -539,7 +802,15 @@ int main() {
                     }
                 }
             }
-            else if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging && gameState == GameState::Playing) {
+
+            else if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging && gameState == GameState::Playing)
+            {
+                if (selectedTile.x != -1)
+                {
+                    tiles[selectedTile.y][selectedTile.x].stopSelectAnimation();
+                    selectedTile = { -1, -1 };
+                }
+
                 dragging = false;
                 sf::Vector2i mousePos = sf::Mouse::getPosition(window);
                 int targetX = (mousePos.x - startX) / squareSize;
@@ -552,12 +823,14 @@ int main() {
                     bool isSelectedCorner = false;
                     bool isTargetCorner = false;
 
-                    for (const auto& corner : corners) {
+                    for (const auto& corner : corners)
+                    {
                         if (corner.x == selectedX && corner.y == selectedY) isSelectedCorner = true;
                         if (corner.x == targetX && corner.y == targetY) isTargetCorner = true;
                     }
 
-                    if (!isSelectedCorner && !isTargetCorner) {
+                    if (!isSelectedCorner && !isTargetCorner)
+                    {
                         lastMove = { selectedX, selectedY, targetX, targetY };
 
                         // Swap tiles
@@ -570,15 +843,15 @@ int main() {
                         gameState = GameState::Swapping; // Set game state to swapping
 
                         // Check matches
-                        if (hasMatches(tileMap)) {
-                            findAndReplaceMatches(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY, corners);
+                        if (!hasMatches(tileMap))
+                        {
+                            // Если совпадений нет, откатываем обмен
+                            revertSwap(tileMap, tiles, lastMove);
                         }
-                        else {
-                            // Откат обмена
-                            std::swap(tiles[selectedY][selectedX], tiles[targetY][targetX]);
-                            std::swap(tileMap[selectedY][selectedX], tileMap[targetY][targetX]);
-                            tiles[selectedY][selectedX].startMoving(tiles[selectedY][selectedX].getPosition());
-                            tiles[targetY][targetX].startMoving(tiles[targetY][targetX].getPosition());
+                        else
+                        {
+                            // Если есть совпадения, продолжаем обработку
+                            findAndReplaceMatches(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY, corners);
                         }
                     }
                 }
@@ -586,25 +859,29 @@ int main() {
         }
 
         // Game state machine
-        switch (gameState) {
+        switch (gameState)
+        {
         case GameState::Playing:
             // Nothing to do here
             break;
         case GameState::Swapping:
             // Check if swapping animation is complete
             if (tiles[lastMove.selectedY][lastMove.selectedX].getAnimator().isFinished() &&
-                tiles[lastMove.targetY][lastMove.targetX].getAnimator().isFinished()) {
+                tiles[lastMove.targetY][lastMove.targetX].getAnimator().isFinished()) 
+            {
                 gameState = GameState::RemovingMatches; // Move to removing state
             }
             break;
-        case GameState::RemovingMatches: {
+        case GameState::RemovingMatches:
+        {
             // Find matches and start removing animations
             toRemove = findMatches(tileMap);
             removeMatches(tileMap, tiles, toRemove);
             gameState = GameState::ApplyingGravity;
             break;
         }
-        case GameState::ApplyingGravity: {
+        case GameState::ApplyingGravity: 
+            {
             bool allFinished = true;
             for (auto& row : tiles)
                 for (auto& tile : row)
@@ -615,11 +892,15 @@ int main() {
                 gameState = GameState::FillingEmptyTiles;
             break;
         }
-        case GameState::FillingEmptyTiles: {
+        case GameState::FillingEmptyTiles: 
+            {
             bool fallingFinished = true;
-            for (int y = 0; y < HEIGHT_MAP; ++y) {
-                for (int x = 0; x < WIDTH_MAP; ++x) {
-                    if (tiles[y][x].isFalling() && !tiles[y][x].getAnimator().isFinished()) {
+            for (int y = 0; y < HEIGHT_MAP; ++y) 
+            {
+                for (int x = 0; x < WIDTH_MAP; ++x) 
+                {
+                    if (tiles[y][x].isFalling() && !tiles[y][x].getAnimator().isFinished()) 
+                    {
                         fallingFinished = false;
                         break;
                     }
@@ -627,9 +908,11 @@ int main() {
                 if (!fallingFinished) break;
             }
 
-            if (fallingFinished) {
+            if (fallingFinished) 
+            {
                 // Проверяем совпадения после заполнения
-                if (hasMatches(tileMap)) {
+                if (hasMatches(tileMap)) 
+                {
                     gameState = GameState::RemovingMatches;
                 }
                 else {
@@ -641,8 +924,10 @@ int main() {
         }
 
         // Обновляем и рисуем элементы одежды на игровом поле
-        for (int i = 0; i < HEIGHT_MAP; ++i) {
-            for (int j = 0; j < WIDTH_MAP; ++j) {
+        for (int i = 0; i < HEIGHT_MAP; ++i) 
+        {
+            for (int j = 0; j < WIDTH_MAP; ++j) 
+            {
                 tiles[i][j].update(deltaTime.asSeconds()); // Обновляем состояние тайла
                 updateTileSprite(tiles[i][j], clothesTex);
             }
@@ -653,14 +938,15 @@ int main() {
         window.draw(mainPanel);
         window.draw(leftPanel);
 
-        for (int i = 0; i < HEIGHT_MAP; ++i) {
-            for (int j = 0; j < WIDTH_MAP; ++j) {
+        for (int i = 0; i < HEIGHT_MAP; ++i) 
+        {
+            for (int j = 0; j < WIDTH_MAP; ++j) 
+            {
                 window.draw(tiles[i][j].sprite); // Рисуем спрайт тайла
             }
         }
 
         window.display();
     }
-
     return 0;
 }
