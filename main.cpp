@@ -11,6 +11,16 @@
 const int HEIGHT_MAP = 7;
 const int WIDTH_MAP = 7;
 
+std::map<int, int> removedTilesCount;
+
+std::map<int, int> firstLevelGoals = {
+       {1, 10}, // Удалить 10 тайлов типа 1
+       //{2, 5},  // Удалить 5 тайлов типа 2
+       //{3, 8}   // Удалить 8 тайлов типа 3
+};
+
+int goal = 10;
+
 const std::map<int, sf::IntRect> tileTextureMap = {
     {1, sf::IntRect(0 * 64, 0, 64, 64)},
     {2, sf::IntRect(1 * 64, 0, 64, 64)},
@@ -117,8 +127,10 @@ private:
     void updateMoving(float deltaTime)
     {
         sf::Vector2f delta = targetPos - currentPos;
-        currentPos += delta * (2.0f * deltaTime); // Скорость движения 1.0, можно настроить
-        if (std::abs(delta.x) < 2.0f && std::abs(delta.y) < 2.0f) {
+        currentPos += delta * (2.0f * deltaTime);
+
+        float distanceSquared = delta.x * delta.x + delta.y * delta.y;
+        if (distanceSquared < 4.0f) { // 2.0f * 2.0f = 4.0f (избегаем sqrt)
             currentPos = targetPos;
             state = TileState::Idle;
         }
@@ -126,12 +138,19 @@ private:
 
     void updateRemoving(float deltaTime)
     {
-        scale = std::max(0.0f, scale - 2.0f * deltaTime); // Скорость исчезновения 0.5, можно настроить
-        alpha = std::max(0.0f, alpha - 255.0f * 2.0f * deltaTime); // Скорость исчезновения альфы 0.5, можно настроить
+        scale = std::max(0.0f, scale - 2.0f * deltaTime);
+        alpha = std::max(0.0f, alpha - 255.0f * 2.0f * deltaTime);
+
         if (scale <= 0.0f) {
-            scale = 1.0f; // Ensure it's exactly 0 to avoid rendering glitches
-            alpha = 0.0f; // Ensure it's exactly 0
-            state = TileState::Idle; // После удаления состояние в Idle, а не Appearing
+            scale = 0.0f;
+        }
+
+        if (alpha <= 0.0f) {
+            alpha = 0.0f;
+        }
+
+        if (scale == 0.0f && alpha == 0.0f) { // Используем точное сравнение с 0
+            state = TileState::Idle;
         }
     }
 
@@ -359,7 +378,7 @@ std::vector<std::vector<bool>> findMatches(const std::vector<std::vector<int>>& 
 }
 
 // Удаление совпадений
-void removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, const std::vector<std::vector<bool>>& toRemove)
+void removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vector<Tile>>& tiles, const std::vector<std::vector<bool>>& toRemove, std::map<int, int>& removedTilesCount)
 {
     int height = tileMap.size();
     int width = tileMap[0].size();
@@ -370,6 +389,17 @@ void removeMatches(std::vector<std::vector<int>>& tileMap, std::vector<std::vect
         {
             if (toRemove[y][x])
             {
+                int tileType = tileMap[y][x];
+                if (tileType != 0 && tileType != 9) // Игнорируем пустые и угловые тайлы
+                {
+                    removedTilesCount[tileType]++; // Увеличиваем счетчик удаленных тайлов
+                }
+
+                if (tileType == 1)
+                {
+                    goal--;
+                }
+
                 tiles[y][x].startRemoving();
                 tileMap[y][x] = 0;
             }
@@ -515,7 +545,7 @@ void findAndReplaceMatches(std::vector<std::vector<int>>& tileMap, std::vector<s
 
         if (!hasMatches) break;
 
-        removeMatches(tileMap, tiles, toRemove);
+        removeMatches(tileMap, tiles, toRemove, removedTilesCount);
         applyGravity(tileMap, tiles, width, height, tileSize, clothesTex, startX, startY);
         fillEmptyTiles(tileMap, tiles, width, height, tileSize, clothesTex, startX, startY, corners);
 
@@ -678,6 +708,47 @@ bool isFallingAnimationFinished(const std::vector<std::vector<Tile>>& tiles)
     return true;
 }
 
+void drawLevelGoals(sf::RenderWindow& window, const std::map<int, int>& levelGoals, const std::map<int, int>& removedTilesCount, const sf::Font& font, int startX, int startY)
+{
+    
+    int yOffset = 0; // Смещение по вертикали для каждой цели
+
+    for (const auto& goal : levelGoals)
+    {
+        int tileType = goal.first;
+        int requiredCount = goal.second;
+        int removedCount = removedTilesCount.count(tileType) ? removedTilesCount.at(tileType) : 0;
+
+        // Формируем строку цели
+        std::stringstream ss;
+        ss << "Tile " << tileType << ": " << removedCount << "/" << requiredCount;
+        //goalText.setString(ss.str());
+
+        // Позиция текста
+        //goalText.setPosition(startX, startY + yOffset);
+        yOffset += 40; // Увеличиваем смещение для следующей цели
+
+        // Отрисовываем текст
+        //window.draw(goalText);
+    }
+}
+
+bool isLevelComplete(const std::map<int, int>& levelGoals, const std::map<int, int>& removedTilesCount)
+{
+    for (const auto& goal : levelGoals)
+    {
+        int tileType = goal.first;
+        int requiredCount = goal.second;
+        int removedCount = removedTilesCount.count(tileType) ? removedTilesCount.at(tileType) : 0;
+
+        if (removedCount < requiredCount)
+        {
+            return false; // Если хотя бы одна цель не выполнена
+        }
+    }
+    return true; // Все цели выполнены
+}
+
 int main()
 {
     setlocale(LC_ALL, "RUSSIAN");
@@ -685,11 +756,12 @@ int main()
     sf::RenderWindow window(sf::VideoMode(1366, 770), "Big wash");
 
     // Load textures
-    sf::Texture background, leftPanelTex, mainPanelTex, clothesTex;
+    sf::Texture background, leftPanelTex, mainPanelTex, clothesTex, levelGoal;
     if (!background.loadFromFile("pictures/background.png") ||
         !leftPanelTex.loadFromFile("pictures/panel_L_arrows.png") ||
         !mainPanelTex.loadFromFile("pictures/main_panel.png") ||
-        !clothesTex.loadFromFile("pictures/clothes.png"))
+        !clothesTex.loadFromFile("pictures/clothes.png") ||
+        !levelGoal.loadFromFile("pictures/cap.png"))
     {
         std::cerr << "Failed to load textures" << std::endl;
         return EXIT_FAILURE;
@@ -699,38 +771,24 @@ int main()
     sf::Sprite backgroundSprite(background);
     sf::Sprite leftPanel(leftPanelTex);
     sf::Sprite mainPanel(mainPanelTex);
+    sf::Sprite levelGoalSprite(levelGoal);
     leftPanel.setPosition(10, 100);
     mainPanel.setPosition(365, 67);
+    levelGoalSprite.setPosition(65, 340);
 
     sf::Vector2i selectedTile = { -1, -1 }; // Координаты выделенного тайла
+    bool isDragging = false; // Флаг перетаскивания
+    sf::Vector2f dragOffset; // Смещение курсора относительно центра тайла
 
     // Initialize game grid
     std::vector<std::vector<int>> tileMap(HEIGHT_MAP, std::vector<int>(WIDTH_MAP, 0));
     std::vector<std::vector<Tile>> tiles(HEIGHT_MAP, std::vector<Tile>(WIDTH_MAP));
-
-
-    //// Initialize random generator
-    //std::random_device rd;
-    //std::mt19937 gen(rd());
-    //std::uniform_int_distribution<> distrib(1, 6);
 
     // Setup initial grid
     for (const auto& pos : corners) tileMap[pos.y][pos.x] = 9;
 
     const int startX = 397;
     const int startY = 99;
-
-    /*for (int y = 0; y < HEIGHT_MAP; ++y)
-    {
-        for (int x = 0; x < WIDTH_MAP; ++x)
-        {
-            if (tileMap[y][x] == 0) tileMap[y][x] = distrib(gen);
-            tiles[y][x].setValue(tileMap[y][x]);
-            tiles[y][x].setTexture(clothesTex);
-            tiles[y][x].setPosition(startX + x * squareSize, startY + y * squareSize);
-            updateTileSprite(tiles[y][x], clothesTex);
-        }
-    }*/
 
     for (int y = 0; y < HEIGHT_MAP; ++y)
     {
@@ -771,13 +829,15 @@ int main()
     bool dragging = false;
     int selectedX = -1, selectedY = -1;
     sf::Clock clock;
-    sf::Font font;
-    sf::Text text;
     GameState gameState = GameState::Playing; // Initial game state
     sf::Clock idleTimer; //таймер бездействия
     std::vector<sf::Vector2i> highlightedTiles; //Подсвеченыые тайлы
     bool isBoardValid = true; //Флаг валидности доски
     idleTimer.restart(); // Запускаем таймер при старте
+
+
+    sf::Font font;
+    sf::Text text;
 
     if (!font.loadFromFile("fonts/fredfredburgerheadline.otf"))
     {
@@ -787,9 +847,27 @@ int main()
     text.setFont(font);
     text.setCharacterSize(60);
     text.setFillColor(sf::Color::White);
-    text.setPosition(90, 523);
+    text.setPosition(500, 300);
     text.setOutlineThickness(3);
     text.setOutlineColor(hexToColor("#6b46d5"));
+
+    int movesLeft = 20; // Начальное количество ходов
+    sf::Text movesText;
+    movesText.setFont(font);
+    movesText.setCharacterSize(50);
+    movesText.setFillColor(sf::Color::White);
+    movesText.setPosition(90, 530); // Позиция счетчика ходов
+    movesText.setOutlineThickness(2);
+    movesText.setOutlineColor(hexToColor("#6b46d5"));
+
+    //int goal = 10;
+    sf::Text goalText;
+    goalText.setFont(font);
+    goalText.setCharacterSize(30);
+    goalText.setFillColor(sf::Color::White);
+    goalText.setPosition(95, 375); // Позиция счетчика цели
+    goalText.setOutlineThickness(2);
+    goalText.setOutlineColor(hexToColor("#6b46d5"));
 
     while (window.isOpen())
     {
@@ -854,6 +932,7 @@ int main()
 
         if (hasMatches(tileMap))
         {
+            //removeMatches(tileMap, tiles, toRemove, removedTilesCount); // Обновляем счетчики
             findAndReplaceMatches(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY, corners);
         }
 
@@ -894,9 +973,19 @@ int main()
                             selectedX = x;
                             selectedY = y;
                             dragging = true;
+
+                            // Вычисляем смещение курсора относительно центра тайла
+                            dragOffset = tiles[y][x].getPosition() - sf::Vector2f(mousePos.x, mousePos.y);
                         }
                     }
                 }
+            }
+
+            else if (event.type == sf::Event::MouseMoved && isDragging)
+            {
+                // Перемещаем тайл за курсором
+                sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                tiles[selectedY][selectedX].setPosition(mousePos.x + dragOffset.x, mousePos.y + dragOffset.y);
             }
 
             else if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging && gameState == GameState::Playing)
@@ -947,7 +1036,9 @@ int main()
                         else
                         {
                             // Если есть совпадения, продолжаем обработку
+                            removeMatches(tileMap, tiles, toRemove, removedTilesCount); // Обновляем счетчики
                             findAndReplaceMatches(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY, corners);
+                            movesLeft--;
                         }
                     }
                 }
@@ -972,7 +1063,7 @@ int main()
         {
             // Find matches and start removing animations
             toRemove = findMatches(tileMap);
-            removeMatches(tileMap, tiles, toRemove);
+            removeMatches(tileMap, tiles, toRemove, removedTilesCount);
             gameState = GameState::ApplyingGravity;
             break;
         }
@@ -1019,6 +1110,68 @@ int main()
         }
         }
 
+        drawLevelGoals(window, firstLevelGoals, removedTilesCount, font, 20, 200);
+
+        // Проверка завершения уровня
+        if (isLevelComplete(firstLevelGoals, removedTilesCount))
+        {
+            sf::RectangleShape darkenOverlay;
+            darkenOverlay.setSize(sf::Vector2f(window.getSize().x, window.getSize().y)); // Размеры окна
+            darkenOverlay.setFillColor(sf::Color(0, 0, 0, 150)); // Черный цвет с полупрозрачностью
+
+            // Уровень завершен
+            sf::Text levelCompleteText;
+            levelCompleteText.setFont(font);
+            levelCompleteText.setString("Level Complete!");
+            levelCompleteText.setCharacterSize(60);
+            levelCompleteText.setFillColor(sf::Color::White);
+            levelCompleteText.setOutlineColor(sf::Color::Green);
+            levelCompleteText.setPosition(window.getSize().x / 2 - levelCompleteText.getLocalBounds().width / 2, window.getSize().y / 2 - levelCompleteText.getLocalBounds().height / 2);
+
+            window.draw(darkenOverlay);
+            window.draw(levelCompleteText);
+            window.display();
+            sf::sleep(sf::seconds(3)); // Пауза перед закрытием окна
+            window.close();
+        }
+
+        if (movesLeft <= 0)
+        {
+            // Создаем прямоугольник для затемнения экрана
+            sf::RectangleShape darkenOverlay;
+            darkenOverlay.setSize(sf::Vector2f(window.getSize().x, window.getSize().y)); // Размеры окна
+            darkenOverlay.setFillColor(sf::Color(0, 0, 0, 150)); // Черный цвет с полупрозрачностью
+
+            // Устанавливаем текст "Game Over!"
+            text.setString("Game Over!");
+            text.setPosition(
+                window.getSize().x / 2 - text.getLocalBounds().width / 2, // Центрируем текст по горизонтали
+                window.getSize().y / 2 - text.getLocalBounds().height / 2 // Центрируем текст по вертикали
+            );
+
+            // Отрисовываем затемнение и текст
+            window.draw(backgroundSprite); // Отрисовываем фон
+            window.draw(mainPanel);
+            window.draw(leftPanel);
+            for (int i = 0; i < HEIGHT_MAP; ++i)
+            {
+                for (int j = 0; j < WIDTH_MAP; ++j)
+                {
+                    window.draw(tiles[i][j].sprite); // Рисуем спрайт тайла
+                }
+            }
+            window.draw(movesText);
+            window.draw(darkenOverlay); // Отрисовываем затемнение
+            window.draw(text); // Отрисовываем текст "Game Over!"
+            window.display();
+
+            sf::sleep(sf::seconds(3)); // Пауза перед закрытием окна
+            window.close();
+        }
+
+        movesText.setString(std::to_string(movesLeft));
+        goalText.setString(std::to_string(goal));
+
         // Обновляем и рисуем элементы одежды на игровом поле
         for (int i = 0; i < HEIGHT_MAP; ++i)
         {
@@ -1042,6 +1195,9 @@ int main()
             }
         }
 
+        window.draw(levelGoalSprite);
+        window.draw(movesText);
+        window.draw(goalText);
         window.display();
     }
     return 0;
