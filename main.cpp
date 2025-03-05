@@ -48,7 +48,10 @@ public:
         scale(1.0f),
         alpha(255.0f),
         state(TileState::Idle),
-        fallSpeed(500.0f) // Скорость падения, настраивается
+        fallSpeed(500.0f), // Скорость падения
+        moveSpeed(2.0f),    // Скорость перемещения
+        removeSpeed(2.0f),  // Скорость удаления
+        appearSpeed(1.0f)   // Скорость появления
     {
     }
 
@@ -110,6 +113,10 @@ public:
         this->scaleY = scaleY;
     }
 
+    /*void setRemovalCallback(std::function<void()> callback) {
+        removalCallback = callback;
+    }*/
+
     float getScaleX() const { return scaleX; }
     float getScaleY() const { return scaleY; }
 
@@ -123,18 +130,32 @@ public:
     void setTargetPosition(const sf::Vector2f& pos) { targetPos = pos; }
     bool isFinished() const { return state == TileState::Idle; } // Добавлено
 
+    // Методы для изменения скорости анимации
+    void setMoveSpeed(float speed) { moveSpeed = speed; }
+    void setRemoveSpeed(float speed) { removeSpeed = speed; }
+    void setAppearSpeed(float speed) { appearSpeed = speed; }
+    void setFallSpeed(float speed) { fallSpeed = speed; }
+
 private:
     void updateMoving(float deltaTime)
     {
         sf::Vector2f delta = targetPos - currentPos;
-        currentPos += delta * (2.0f * deltaTime);
+        float distance = std::sqrt(delta.x * delta.x + delta.y * delta.y); // Вычисляем расстояние до цели
 
-        float distanceSquared = delta.x * delta.x + delta.y * delta.y;
-        if (distanceSquared < 4.0f) { // 2.0f * 2.0f = 4.0f (избегаем sqrt)
+        // Если расстояние меньше порога, завершаем анимацию
+        if (distance < 1.0f) {
             currentPos = targetPos;
             state = TileState::Idle;
         }
+        else {
+            // Двигаемся к цели с постоянной скоростью
+            float speed = 1000.0f; // Скорость перемещения (можно настроить)
+            sf::Vector2f direction = delta / distance; // Нормализуем вектор направления
+            currentPos += direction * speed * deltaTime; // Двигаемся к цели
+        }
     }
+
+    std::function<void()> removalCallback;
 
     void updateRemoving(float deltaTime)
     {
@@ -156,8 +177,8 @@ private:
 
     void updateAppearing(float deltaTime)
     {
-        scale = std::min(1.0f, scale + 1.0f * deltaTime); // Скорость появления 1.0, можно настроить
-        alpha = std::min(255.0f, alpha + 255.0f * 1.0f * deltaTime); // Скорость появления альфы 1.0, можно настроить
+        scale = std::min(1.0f, scale + appearSpeed * deltaTime);
+        alpha = std::min(255.0f, alpha + 255.0f * appearSpeed * deltaTime);
         if (scale >= 1.0f)
         {
             scale = 1.0f; // Ensure it's exactly 1
@@ -183,6 +204,9 @@ private:
     float alpha;
     TileState state;
     float fallSpeed; // Скорость падения
+    float moveSpeed; // Скорость перемещения
+    float removeSpeed; // Скорость удаления
+    float appearSpeed; // Скорость появления
     float scaleX = 1.0f;
     float scaleY = 1.0f;
 };
@@ -259,6 +283,11 @@ public:
 
     void stopSelectAnimation() {
         isSelected = false;
+        animator.setScale(1.0f, 1.0f);
+        sprite.setPosition(animator.getPosition());
+    }
+
+    void resetAnimation() {
         animator.setScale(1.0f, 1.0f);
         sprite.setPosition(animator.getPosition());
     }
@@ -655,8 +684,21 @@ enum class GameState
     Swapping,
     RemovingMatches,
     ApplyingGravity,
-    FillingEmptyTiles
+    FillingEmptyTiles,
+    LevelComplete // Новое состояние
 };
+
+bool areAllAnimationsFinished(const std::vector<std::vector<Tile>>& tiles)
+{
+    for (const auto& row : tiles) {
+        for (const auto& tile : row) {
+            if (tile.getState() != TileState::Idle) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
 
 void fillInitialTiles(std::vector<std::vector<int>>& tileMap,
     std::vector<std::vector<Tile>>& tiles,
@@ -710,7 +752,7 @@ bool isFallingAnimationFinished(const std::vector<std::vector<Tile>>& tiles)
 
 void drawLevelGoals(sf::RenderWindow& window, const std::map<int, int>& levelGoals, const std::map<int, int>& removedTilesCount, const sf::Font& font, int startX, int startY)
 {
-    
+
     int yOffset = 0; // Смещение по вертикали для каждой цели
 
     for (const auto& goal : levelGoals)
@@ -819,6 +861,17 @@ int main()
             std::cout << tileMap[y][x] << " ";
         }
         std::cout << std::endl;
+    }
+
+    for (int y = 0; y < HEIGHT_MAP; ++y)
+    {
+        for (int x = 0; x < WIDTH_MAP; ++x)
+        {
+            tiles[y][x].getAnimator().setMoveSpeed(1.0f); // Увеличиваем скорость перемещения
+            tiles[y][x].getAnimator().setRemoveSpeed(1.0f); // Увеличиваем скорость удаления
+            tiles[y][x].getAnimator().setAppearSpeed(1.0f); // Увеличиваем скорость появления
+            tiles[y][x].getAnimator().setFallSpeed(450.0f); // Увеличиваем скорость падения
+        }
     }
 
     auto future = std::async(std::launch::async, findMatches, std::ref(tileMap));
@@ -954,6 +1007,33 @@ int main()
             {
                 window.close();
             }
+
+            else if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::R)
+            {
+                // Перезапуск игры
+                gameState = GameState::Playing; // Сброс состояния игры
+                movesLeft = 20; // Сброс счетчика ходов
+                removedTilesCount.clear(); // Очистка счетчиков удаленных тайлов
+                goal = 10; // Сброс цели
+
+                // Переинициализация игрового поля
+                tileMap = std::vector<std::vector<int>>(HEIGHT_MAP, std::vector<int>(WIDTH_MAP, 0));
+                tiles = std::vector<std::vector<Tile>>(HEIGHT_MAP, std::vector<Tile>(WIDTH_MAP));
+
+                // Установка угловых элементов
+                for (const auto& pos : corners) tileMap[pos.y][pos.x] = 9;
+
+                // Заполнение начальных тайлов
+                fillInitialTiles(tileMap, tiles, WIDTH_MAP, HEIGHT_MAP, squareSize, clothesTex, startX, startY);
+
+                // Сброс выделения и состояния перетаскивания
+                selectedTile = { -1, -1 };
+                isDragging = false;
+                dragging = false;
+
+                std::cout << "Game restarted!" << std::endl;
+            }
+
             else if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && gameState == GameState::Playing)
             {
                 sf::Vector2i mousePos = sf::Mouse::getPosition(window);
@@ -1108,31 +1188,48 @@ int main()
             }
             break;
         }
+        case GameState::LevelComplete:
+        {
+            static bool shown = false;
+            if (!shown)
+            {
+                // Показать Level Complete только один раз
+                shown = true;
+
+                sf::RectangleShape darkenOverlay;
+                darkenOverlay.setSize(sf::Vector2f(window.getSize().x, window.getSize().y));
+                darkenOverlay.setFillColor(sf::Color(0, 0, 0, 150));
+
+                sf::Text levelCompleteText;
+                levelCompleteText.setFont(font);
+                levelCompleteText.setString("Level Complete!");
+                levelCompleteText.setCharacterSize(60);
+                levelCompleteText.setFillColor(sf::Color::White);
+                levelCompleteText.setOutlineColor(sf::Color::Green);
+                levelCompleteText.setPosition(window.getSize().x / 2 - levelCompleteText.getLocalBounds().width / 2,
+                    window.getSize().y / 2 - levelCompleteText.getLocalBounds().height / 2);
+
+                window.draw(darkenOverlay);
+                window.draw(levelCompleteText);
+                window.display();
+
+                sf::sleep(sf::seconds(3));
+                window.close();
+            }
+            break;
         }
+        }
+        
 
         drawLevelGoals(window, firstLevelGoals, removedTilesCount, font, 20, 200);
 
         // Проверка завершения уровня
         if (isLevelComplete(firstLevelGoals, removedTilesCount))
         {
-            sf::RectangleShape darkenOverlay;
-            darkenOverlay.setSize(sf::Vector2f(window.getSize().x, window.getSize().y)); // Размеры окна
-            darkenOverlay.setFillColor(sf::Color(0, 0, 0, 150)); // Черный цвет с полупрозрачностью
-
-            // Уровень завершен
-            sf::Text levelCompleteText;
-            levelCompleteText.setFont(font);
-            levelCompleteText.setString("Level Complete!");
-            levelCompleteText.setCharacterSize(60);
-            levelCompleteText.setFillColor(sf::Color::White);
-            levelCompleteText.setOutlineColor(sf::Color::Green);
-            levelCompleteText.setPosition(window.getSize().x / 2 - levelCompleteText.getLocalBounds().width / 2, window.getSize().y / 2 - levelCompleteText.getLocalBounds().height / 2);
-
-            window.draw(darkenOverlay);
-            window.draw(levelCompleteText);
-            window.display();
-            sf::sleep(sf::seconds(3)); // Пауза перед закрытием окна
-            window.close();
+            if (areAllAnimationsFinished(tiles))
+            {
+                gameState = GameState::LevelComplete;
+            }
         }
 
         if (movesLeft <= 0)
